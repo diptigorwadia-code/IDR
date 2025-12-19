@@ -1,0 +1,6 @@
+pyswisseph
+swisseph
+streamlit
+pandas
+numpy
+pytz
