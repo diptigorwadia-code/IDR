@@ -1,0 +1,230 @@
+import streamlit as st
+import swisseph as swe
+import datetime as dt
+import pandas as pd
+
+#EPHE_PATH = os.path.join(os.path.dirname(__file__), "ephe")
+#swe.set_ephe_path(EPHE_PATH)
+
+
+
+# =============================
+# CONFIG
+# =============================
+swe.set_sid_mode(swe.SIDM_LAHIRI)
+#EPHE_PATH = os.path.join(os.path.dirname(__file__), "ephe")
+#swe.set_ephe_path(EPHE_PATH)
+
+LAT = 19.07598
+LON = 72.87766
+FLAGS = swe.FLG_SWIEPH | swe.FLG_SIDEREAL
+
+
+START = (9, 15)
+END   = (15, 30)
+
+NAKSHATRAS = [
+    "Ashwini","Bharani","Krittika","Rohini","Mrigashira",
+    "Ardra","Punarvasu","Pushya","Ashlesha","Magha",
+    "Purva Phalguni","Uttara Phalguni","Hasta","Chitra",
+    "Swati","Vishakha","Anuradha","Jyeshtha","Mula",
+    "Purva Ashadha","Uttara Ashadha","Shravana","Dhanishtha",
+    "Shatabhisha","Purva Bhadrapada","Uttara Bhadrapada","Revati"
+]
+
+ZODIAC_SIGNS = [
+    "Aries","Taurus","Gemini","Cancer","Leo","Virgo",
+    "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"
+]
+
+NAK_BIAS = {
+    "Rohini":"Bullish / accumulation",
+    "Mrigashira":"Trend friendly",
+    "Punarvasu":"Recovery bounce",
+    "Pushya":"Institutional strength",
+    "Hasta":"Scalping friendly",
+    "Chitra":"Breakout bias",
+    "Swati":"Independent volatility",
+    "Anuradha":"Continuation",
+    "Uttara Ashadha":"Follow-through trend",
+    "Shravana":"News trend",
+    "Dhanishtha":"Momentum",
+    "Revati":"Calm / mild trend",
+    "Bharani":"Profit booking",
+    "Ardra":"Panic / crash risk",
+    "Ashlesha":"Fake breakout",
+    "Magha":"Gap and dump",
+    "Mula":"Sharp reversal",
+    "Purva Ashadha":"Aggressive",
+    "Jyeshtha":"Sharp reversal",
+    "Purva Bhadrapada":"Extreme swings",
+    "Krittika":"High volatility",
+    "Purva Phalguni":"Overtrading",
+    "Uttara Phalguni":"Trend after confusion",
+    "Vishakha":"Two leg move",
+    "Shatabhisha":"Algo / fake breaks",
+    "Uttara Bhadrapada":"Late reversal",
+}
+
+PLANETS = {
+    "Mars": swe.MARS,
+    "Saturn": swe.SATURN,
+    "Rahu": swe.MEAN_NODE,
+    "Mercury": swe.MERCURY,
+    "Venus": swe.VENUS
+}
+
+ASPECTS = [0, 45, 60, 90, 120, 180]
+ORB_DEG = 1.0
+
+NAK_SIZE = 360/27
+PADA_SIZE = NAK_SIZE/4
+
+
+# =============================
+# CALC FUNCTIONS
+# =============================
+
+def jd_from_ist(d):
+    d_utc = d - dt.timedelta(hours=5, minutes=30)
+    return swe.julday(d_utc.year, d_utc.month, d_utc.day,
+                      d_utc.hour + d_utc.minute/60)
+
+def lon(jd, planet):
+    pos, _ = swe.calc_ut(jd, planet, FLAGS)
+    return pos[0] % 360
+
+
+def get_nak_pada(l):
+    i = int(l // NAK_SIZE)
+    pada = int(((l - i*NAK_SIZE) // PADA_SIZE) + 1)
+    return NAKSHATRAS[i], pada
+
+def angle(a, b):
+    d = abs(a - b) % 360
+    return 360 - d if d > 180 else d
+
+def get_ascendant(jd):
+    ascmc, cusp = swe.houses_ex(jd, LAT, LON, b'P', FLAGS)
+    asc = ascmc[0] % 360
+    sign_index = int(asc // 30)
+    return ZODIAC_SIGNS[sign_index], asc
+
+
+# =============================
+# SCAN FUNCTION
+# =============================
+
+def scan(date, step=5):
+    rows = []
+    last_nak, last_pada, last_asc = None, None, None
+
+    t = dt.datetime(date.year, date.month, date.day, START[0], START[1])
+    end = dt.datetime(date.year, date.month, date.day, END[0], END[1])
+
+    while t <= end:
+        jd = jd_from_ist(t)
+
+        m = lon(jd, swe.MOON)
+        nak, pada = get_nak_pada(m)
+        asc, _ = get_ascendant(jd)
+
+        if last_asc and asc != last_asc:
+            rows.append([t, "Ascendant Change", f"{last_asc} → {asc}"])
+
+        if last_nak and nak != last_nak:
+            rows.append([t, "Nakshatra Change", f"{last_nak} → {nak}"])
+
+        if last_pada and pada != last_pada:
+            rows.append([t, "Pada Change", f"{last_pada} → {pada}"])
+
+        for pname, pid in PLANETS.items():
+            p = lon(jd, pid)
+            for asp in ASPECTS:
+                if angle(m, (p - asp) % 360) <= ORB_DEG:
+                    rows.append([t, f"Moon-{pname}", f"{asp}°"])
+
+        last_asc, last_nak, last_pada = asc, nak, pada
+        t += dt.timedelta(minutes=step)
+
+    df = pd.DataFrame(rows, columns=["Time", "Event", "Detail"])
+    return nak, NAK_BIAS.get(nak, "Neutral"), df
+
+
+# =============================
+# STREAMLIT UI
+# =============================
+
+st.set_page_config(page_title="Astro Market Scanner", layout="wide")
+
+st.markdown("""
+<style>
+body {background-color: #111;}
+.stApp {background-color: #000;}
+.big {
+    font-size: 28px;
+    font-weight: bold;
+    color: #00ff99;
+}
+.greenbox {
+    background: #003300;
+    padding: 15px;
+    color: #00ff99;
+    border-radius: 10px;
+}
+.yellowbox {
+    background: #332b00;
+    padding: 15px;
+    color: #ffee55;
+    border-radius: 10px;
+}
+.redbox {
+    background: #330000;
+    padding: 15px;
+    color: #ff5555;
+    border-radius: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("INTRADAY REVERSAL TIME CREATED BY RAO SAAB ")
+
+# Date selection
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    picked = st.date_input("Select Date", dt.date.today())
+
+with col2:
+    if st.button("Today"):
+        picked = dt.date.today()
+
+with col3:
+    now_click = st.button("Now (Live)")
+
+if now_click:
+    picked = dt.datetime.now().date()
+
+st.markdown("---")
+
+# Run Scan
+nak, bias, df = scan(picked)
+
+# Bias Color
+if "bull" in bias.lower() or "strength" in bias.lower():
+    box = "greenbox"
+elif "reversal" in bias.lower() or "risk" in bias.lower():
+    box = "redbox"
+else:
+    box = "yellowbox"
+
+st.markdown(f"<div class='{box}'><span class='big'>Moon Nakshatra: {nak}</span><br>Bias: {bias}</div>", 
+            unsafe_allow_html=True)
+
+st.markdown("### 🔁 Intraday Events")
+
+if df.empty:
+    st.warning("No events detected.")
+else:
+    df["Time"] = df["Time"].dt.strftime("%H:%M")
+    st.dataframe(df, use_container_width=True)
