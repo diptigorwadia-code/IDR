@@ -187,7 +187,7 @@ body {background-color: #111;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("INTRADAY REVERSAL TIME CREATED BY RAO SAAB ")
+st.title("INTRADAY REVERSAL TIME CREATED BY DG ")
 
 # Date selection
 col1, col2, col3 = st.columns(3)
